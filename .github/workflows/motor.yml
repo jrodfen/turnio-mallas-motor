@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Descargar el código
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Descarga todo el historial para evitar errores de pull
 
       - name: Instalar Node.js
         uses: actions/setup-node@v4
@@ -26,11 +28,10 @@ jobs:
       - name: Ejecutar Extractor y Optimizador
         run: npm start
 
-      - name: Guardar los JSONs en el repositorio público
+      - name: Guardar los JSONs (Limpieza Total)
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git pull --rebase origin main
-          git add *.json
-          git commit -m "Actualización automática Mallas Renfe" || echo "No hay cambios nuevos"
-          git push
+          git add -A
+          git commit -m "Actualización automática Mallas Renfe" || echo "No hay cambios"
+          git push origin main --force
