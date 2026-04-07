@@ -29,17 +29,6 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const routes = await leerCSVdesdeZIP(zip, 'routes.txt');
         const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
         const calendar = await leerCSVdesdeZIP(zip, 'calendar.txt');
-        const calendarDates = await leerCSVdesdeZIP(zip, 'calendar_dates.txt');
-
-        // FILTRO ESTRICTO: 21 días (Suficiente para el cuadrante)
-        let hoy = new Date();
-        let fHoy = hoy.getFullYear() + String(hoy.getMonth()+1).padStart(2,'0') + String(hoy.getDate()).padStart(2,'0');
-        let fMax = new Date(); fMax.setDate(hoy.getDate() + 21);
-        let fMaxStr = fMax.getFullYear() + String(fMax.getMonth()+1).padStart(2,'0') + String(fMax.getDate()).padStart(2,'0');
-
-        let validSids = new Set();
-        calendar.forEach(c => { if (c.end_date >= fHoy && c.start_date <= fMaxStr) validSids.add(c.service_id); });
-        calendarDates.forEach(cd => { if (cd.date >= fHoy && cd.date <= fMaxStr) validSids.add(cd.service_id); });
 
         let estaciones = {};
         stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
@@ -49,7 +38,7 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
 
         let viajes = {};
         trips.forEach(t => {
-            if (!validSids.has(t.service_id)) return; 
+            // HEMOS QUITADO EL FILTRO DE FECHAS PARA QUE NO SALGA VACÍO
             viajes[t.trip_id] = {
                 n: t.trip_short_name || t.trip_id,
                 l: rutasMap[t.route_id] || "",
