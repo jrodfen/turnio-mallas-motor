@@ -1,0 +1,36 @@
+name: Actualizador Nocturno Mallas Renfe
+
+on:
+  schedule:
+    - cron: '0 3 * * *' 
+  workflow_dispatch: 
+
+permissions:
+  contents: write
+
+jobs:
+  procesar-mallas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Instalar herramientas
+        run: npm install
+
+      - name: Ejecutar Extractor y Optimizador
+        run: npm start
+
+      - name: Guardar los JSONs en el repositorio público
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add *.json
+          git commit -m "Actualización automática Mallas Renfe" || echo "No hay cambios nuevos"
+          git push
