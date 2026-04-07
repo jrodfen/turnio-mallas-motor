@@ -29,7 +29,7 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const routes = await leerCSVdesdeZIP(zip, 'routes.txt');
         const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
 
-        // Regex oficial de tu Buscador Trenes.html
+        // Regex idéntica a tu Buscador.html
         const regexConocidos = /\b(ave|alvia|avant|intercity|md|media distancia|regional|avlo|euromed|trenhotel|proximidad|express)\b/i;
 
         let estaciones = {};
@@ -47,16 +47,15 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
             let linea = rShort !== "" ? rShort : (rLong !== "" ? rLong : "Estándar");
 
             rutasMap[r.route_id] = {
-                p: categoria, // Producto
-                f: esCercanias ? `Cercanías (Línea ${linea})` : categoria, // Nombre Frontal
-                l: linea, // Línea
+                p: categoria, // productoFiltro
+                f: esCercanias ? `Cercanías (Línea ${linea})` : categoria, // nombreVisualFrontal
+                l: linea, // lineaTren
                 c: esCercanias
             };
         });
 
         let viajes = {};
-        // Limite de seguridad para evitar >100MB en GitHub
-        const tripsLimitados = trips.slice(0, 25000); 
+        const tripsLimitados = trips.slice(0, 20000); // 20k viajes para no saturar
 
         tripsLimitados.forEach(t => {
             let r = rutasMap[t.route_id] || { p: "Tren", f: "Tren", l: "", c: false };
@@ -85,15 +84,18 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
                 let seq = parseInt(st.stop_sequence);
                 horarios.push({ t: st.trip_id, s: st.stop_id, a: st.arrival_time, d: st.departure_time, q: seq });
                 
-                if (!limites[st.trip_id]) limites[st.trip_id] = { min: seq, max: seq, o: st.stop_id, d: st.stop_id, h: st.arrival_time };
-                if (seq < limites[st.trip_id].min) { limites[st.trip_id].min = seq; limites[st.trip_id].o = st.stop_id; }
-                if (seq > limites[st.trip_id].max) { limites[st.trip_id].max = seq; limites[st.trip_id].d = st.stop_id; limites[st.trip_id].h = st.arrival_time; }
+                if (!limites[st.trip_id]) {
+                    limites[st.trip_id] = { min: seq, max: seq, o: st.stop_id, d: st.stop_id, h: st.arrival_time };
+                } else {
+                    if (seq < limites[st.trip_id].min) { limites[st.trip_id].min = seq; limites[st.trip_id].o = st.stop_id; }
+                    if (seq > limites[st.trip_id].max) { limites[st.trip_id].max = seq; limites[st.trip_id].d = st.stop_id; limites[st.trip_id].h = st.arrival_time; }
+                }
             }).on('end', resolve);
         });
 
         const final = { v: "1.3", e: estaciones, h: horarios, j: viajes, l: limites };
         fs.writeFileSync(archivoSalida, JSON.stringify(final));
-        console.log(`✅ ${tipoMalla} finalizado.`);
+        console.log(`✅ ${tipoMalla} procesado.`);
     } catch (e) { console.error(e); }
 }
 
