@@ -28,23 +28,12 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
         const stops = await leerCSVdesdeZIP(zip, 'stops.txt');
         const routes = await leerCSVdesdeZIP(zip, 'routes.txt');
-        const calendar = await leerCSVdesdeZIP(zip, 'calendar.txt');
 
-        // 📅 FILTRO INTELIGENTE: Próximos 7 días (para evitar el 0MB y el >100MB)
-        let hoy = new Date();
-        let fHoy = hoy.getFullYear() + String(hoy.getMonth()+1).padStart(2,'0') + String(hoy.getDate()).padStart(2,'0');
-        let fSemana = new Date(); fSemana.setDate(hoy.getDate() + 7);
-        let fSemanaStr = fSemana.getFullYear() + String(fSemana.getMonth()+1).padStart(2,'0') + String(fSemana.getDate()).padStart(2,'0');
+        console.log(`📊 Total viajes en el ZIP: ${trips.length}`);
 
-        console.log(`Buscando trenes entre ${fHoy} y ${fSemanaStr}...`);
-
-        let validSids = new Set();
-        calendar.forEach(c => {
-            // Si el fin del servicio es después de hoy Y el inicio es antes de que acabe la semana... ¡LO QUEREMOS!
-            if (c.end_date >= fHoy && c.start_date <= fSemanaStr) {
-                validSids.add(c.service_id);
-            }
-        });
+        // 🛡️ LIMITADOR DE SEGURIDAD (Para no pasar de 100MB en GitHub)
+        // Cogemos solo los primeros 15.000 viajes para asegurar que no esté vacío
+        const viajesLimitados = trips.slice(0, 15000);
 
         let estaciones = {};
         stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
@@ -52,8 +41,7 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         routes.forEach(r => { rutasMap[r.route_id] = r.route_short_name || r.route_long_name; });
 
         let viajes = {};
-        trips.forEach(t => {
-            if (!validSids.has(t.service_id)) return; 
+        viajesLimitados.forEach(t => {
             viajes[t.trip_id] = {
                 n: t.trip_short_name || t.trip_id,
                 l: rutasMap[t.route_id] || "",
@@ -62,17 +50,20 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
             };
         });
 
-        console.log(`✅ Viajes válidos encontrados: ${Object.keys(viajes).length}`);
+        console.log(`✅ Procesando ${Object.keys(viajes).length} viajes seleccionados...`);
 
         let horarios = [];
         let limites = {};
-        const bufferStream = new Readable();
-        bufferStream.push(zip.getEntry('stop_times.txt').getData());
-        bufferStream.push(null);
-
+        
         await new Promise((resolve) => {
+            const entry = zip.getEntry('stop_times.txt');
+            const bufferStream = new Readable();
+            bufferStream.push(entry.getData());
+            bufferStream.push(null);
+
             bufferStream.pipe(csv()).on('data', (st) => {
-                if (!viajes[st.trip_id]) return; 
+                if (!viajes[st.trip_id]) return; // Solo paradas de los viajes que hemos aceptado
+                
                 let seq = parseInt(st.stop_sequence);
                 horarios.push({ t: st.trip_id, s: st.stop_id, a: st.arrival_time, d: st.departure_time, q: seq });
                 
@@ -88,7 +79,7 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
 
         const final = { v: "1.2", u: new Date().toLocaleString('es-ES'), e: estaciones, h: horarios, j: viajes, l: limites };
         fs.writeFileSync(archivoSalida, JSON.stringify(final));
-        console.log(`📦 Archivo guardado: ${Math.round(fs.statSync(archivoSalida).size / 1024 / 1024)} MB`);
+        console.log(`📦 Finalizado. Peso: ${Math.round(fs.statSync(archivoSalida).size / 1024 / 1024)} MB`);
 
     } catch (e) { console.error("❌ ERROR:", e); }
 }
