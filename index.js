@@ -28,13 +28,38 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const routes = await leerCSVdesdeZIP(zip, 'routes.txt');
         const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
         const stops = await leerCSVdesdeZIP(zip, 'stops.txt');
+        const calendar = await leerCSVdesdeZIP(zip, 'calendar.txt');
+        const calendarDates = await leerCSVdesdeZIP(zip, 'calendar_dates.txt');
+
+        // 📅 FILTRO INTELIGENTE: PRÓXIMOS 7 DÍAS
+        let hoy = new Date();
+        let fHoy = hoy.getFullYear() + String(hoy.getMonth()+1).padStart(2,'0') + String(hoy.getDate()).padStart(2,'0');
+        let fFin = new Date(); fFin.setDate(hoy.getDate() + 7);
+        let fFinStr = fFin.getFullYear() + String(fFin.getMonth()+1).padStart(2,'0') + String(fFin.getDate()).padStart(2,'0');
+
+        let validSids = new Set();
+        
+        // Revisamos el calendario general
+        calendar.forEach(c => {
+            let sid = (c.service_id || "").trim();
+            let start = (c.start_date || "").trim();
+            let end = (c.end_date || "").trim();
+            if (end >= fHoy && start <= fFinStr) validSids.add(sid);
+        });
+
+        // Revisamos las excepciones y días sueltos (muy común en Renfe)
+        calendarDates.forEach(cd => {
+            let sid = (cd.service_id || "").trim();
+            let date = (cd.date || "").trim();
+            if (date >= fHoy && date <= fFinStr) validSids.add(sid);
+        });
 
         // 🚫 FILTRO ANTI-RODALIES: Ignora líneas R1, R2, R3...
         const regexRodalies = /^R\d+/i; 
 
         let rutasValidas = {};
         routes.forEach(r => {
-            let routeIdLimpio = (r.route_id || "").trim(); // <-- ELIMINAMOS ESPACIOS BASURA
+            let routeIdLimpio = (r.route_id || "").trim();
             let nombreCorto = (r.route_short_name || "").trim();
             if (regexRodalies.test(nombreCorto)) return; 
 
@@ -47,23 +72,27 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         });
 
         let viajes = {};
-        // ⚖️ Limitamos a 45.000 viajes
-        const tripsAceptados = trips.slice(0, 45000); 
-
-        tripsAceptados.forEach(t => {
-            let routeIdViaje = (t.route_id || "").trim(); // <-- ELIMINAMOS ESPACIOS BASURA
+        // 🌍 YA NO HAY LÍMITE DE 45.000. ¡Coge toda España!
+        trips.forEach(t => {
+            let routeIdViaje = (t.route_id || "").trim();
             let tripIdViaje = (t.trip_id || "").trim();
+            let serviceIdViaje = (t.service_id || "").trim();
             
-            if (!rutasValidas[routeIdViaje]) return; // ¡Ahora sí coincidirán!
+            if (!rutasValidas[routeIdViaje]) return; 
+            
+            // Si el tren no circula en los próximos 7 días, a la papelera
+            if (!validSids.has(serviceIdViaje)) return; 
             
             viajes[tripIdViaje] = { 
                 ...rutasValidas[routeIdViaje], 
                 n: (t.trip_short_name || t.trip_id).trim(), 
-                s: (t.service_id || "").trim() 
+                s: serviceIdViaje,
+                u: (t.block_id || "N/D").trim(),
+                a: (t.wheelchair_accessible || "0").trim()
             };
         });
 
-        console.log(`✅ Viajes aceptados (Sin Rodalies): ${Object.keys(viajes).length}`);
+        console.log(`✅ Viajes aceptados (Toda España - 7 días): ${Object.keys(viajes).length}`);
 
         let estaciones = {};
         stops.forEach(s => { 
@@ -96,7 +125,7 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
             }).on('end', resolve);
         });
 
-        const final = { v: "1.4", e: estaciones, h: horarios, j: viajes, l: limites };
+        const final = { v: "1.5", e: estaciones, h: horarios, j: viajes, l: limites };
         fs.writeFileSync(archivoSalida, JSON.stringify(final));
         
         const pesoMB = Math.round(fs.statSync(archivoSalida).size / 1024 / 1024);
