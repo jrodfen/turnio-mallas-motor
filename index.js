@@ -29,14 +29,13 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
         const stops = await leerCSVdesdeZIP(zip, 'stops.txt');
 
-        // 🚫 FILTRO ANTI-RODALIES: Ignora líneas R1, R2, R3...
         const regexRodalies = /^R\d+/i; 
 
         let rutasValidas = {};
         routes.forEach(r => {
             let routeIdLimpio = (r.route_id || "").trim();
             let nombreCorto = (r.route_short_name || "").trim();
-            if (regexRodalies.test(nombreCorto)) return; // Adiós Rodalies
+            if (regexRodalies.test(nombreCorto)) return; 
 
             rutasValidas[routeIdLimpio] = {
                 p: tipoMalla === "Cercanías" ? "Cercanías" : "Media/Larga Distancia",
@@ -47,12 +46,21 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         });
 
         let viajes = {};
-        // 🌍 MODO DIOS: Sin límites (ni slice ni fechas). Todo lo que no sea Rodalies, entra.
+        let conteoPorRuta = {};
+
+        // ⚖️ EL TRUCO MAGISTRAL: "Cupo Equitativo"
+        // Asignamos un máximo de 500 viajes POR LÍNEA. 
+        // 500 viajes cubren más de un día entero de trenes. ¡Sitio para todos!
         trips.forEach(t => {
             let routeIdViaje = (t.route_id || "").trim();
             let tripIdViaje = (t.trip_id || "").trim();
             
             if (!rutasValidas[routeIdViaje]) return; 
+
+            if (tipoMalla === "Cercanías") {
+                conteoPorRuta[routeIdViaje] = (conteoPorRuta[routeIdViaje] || 0) + 1;
+                if (conteoPorRuta[routeIdViaje] > 500) return; // Cupo lleno para esta línea
+            }
             
             viajes[tripIdViaje] = { 
                 ...rutasValidas[routeIdViaje], 
@@ -63,7 +71,7 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
             };
         });
 
-        console.log(`✅ Viajes aceptados (Toda España sin Rodalies): ${Object.keys(viajes).length}`);
+        console.log(`✅ Viajes aceptados (${tipoMalla}): ${Object.keys(viajes).length}`);
 
         let estaciones = {};
         stops.forEach(s => { 
@@ -85,18 +93,22 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
                 if (!viajes[tripIdStop]) return;
                 
                 let seq = parseInt(st.stop_sequence);
-                horarios.push({ t: tripIdStop, s: stopId, a: st.arrival_time, d: st.departure_time, q: seq });
+                // ✂️ Recortamos los segundos de la hora para ahorrar muchísimos Megas
+                let aShort = (st.arrival_time || "").substring(0, 5);
+                let dShort = (st.departure_time || "").substring(0, 5);
+
+                horarios.push({ t: tripIdStop, s: stopId, a: aShort, d: dShort, q: seq });
                 
                 if (!limites[tripIdStop]) {
-                    limites[tripIdStop] = { min: seq, max: seq, o: stopId, d: stopId, h: st.arrival_time };
+                    limites[tripIdStop] = { min: seq, max: seq, o: stopId, d: stopId, h: aShort };
                 } else {
                     if (seq < limites[tripIdStop].min) { limites[tripIdStop].min = seq; limites[tripIdStop].o = stopId; }
-                    if (seq > limites[tripIdStop].max) { limites[tripIdStop].max = seq; limites[tripIdStop].d = stopId; limites[tripIdStop].h = st.arrival_time; }
+                    if (seq > limites[tripIdStop].max) { limites[tripIdStop].max = seq; limites[tripIdStop].d = stopId; limites[tripIdStop].h = aShort; }
                 }
             }).on('end', resolve);
         });
 
-        const final = { v: "1.6", e: estaciones, h: horarios, j: viajes, l: limites };
+        const final = { v: "1.7", e: estaciones, h: horarios, j: viajes, l: limites };
         fs.writeFileSync(archivoSalida, JSON.stringify(final));
         
         const pesoMB = Math.round(fs.statSync(archivoSalida).size / 1024 / 1024);
