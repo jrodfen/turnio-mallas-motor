@@ -25,45 +25,50 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const response = await axios.get(url, { responseType: 'arraybuffer' });
         const zip = new AdmZip(response.data);
         
-        const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
         const stops = await leerCSVdesdeZIP(zip, 'stops.txt');
         const routes = await leerCSVdesdeZIP(zip, 'routes.txt');
+        const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
 
-        console.log(`📊 Total viajes en el ZIP: ${trips.length}`);
-
-        // 🛡️ LIMITADOR DE SEGURIDAD (Para no pasar de 100MB en GitHub)
-        // Cogemos solo los primeros 15.000 viajes para asegurar que no esté vacío
-        const viajesLimitados = trips.slice(0, 15000);
+        // Regex del Buscador.html para detectar productos de Larga Distancia
+        const regexLD = /\b(ave|alvia|avant|intercity|md|media distancia|regional|avlo|euromed|trenhotel|proximidad|express)\b/i;
 
         let estaciones = {};
         stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
-        let rutasMap = {};
-        routes.forEach(r => { rutasMap[r.route_id] = r.route_short_name || r.route_long_name; });
 
-        let viajes = {};
-        viajesLimitados.forEach(t => {
-            viajes[t.trip_id] = {
-                n: t.trip_short_name || t.trip_id,
-                l: rutasMap[t.route_id] || "",
-                s: t.service_id,
-                c: tipoMalla === "Cercanías"
+        let rutasMap = {};
+        routes.forEach(r => {
+            let textoRuta = ((r.route_short_name || "") + " " + (r.route_long_name || "")).toLowerCase();
+            let esCercanias = !regexLD.test(textoRuta);
+            
+            rutasMap[r.route_id] = {
+                l: r.route_short_name || (esCercanias ? "Cercanías" : "Tren"),
+                c: esCercanias
             };
         });
 
-        console.log(`✅ Procesando ${Object.keys(viajes).length} viajes seleccionados...`);
+        let viajes = {};
+        // Filtramos a 15.000 para Cercanías y todo para MDLD
+        const tripsAProcesar = tipoMalla === "Cercanías" ? trips.slice(0, 15000) : trips;
+
+        tripsAProcesar.forEach(t => {
+            let r = rutasMap[t.route_id] || { l: "Tren", c: false };
+            viajes[t.trip_id] = {
+                n: t.trip_short_name || t.trip_headsign || t.trip_id,
+                l: r.l,
+                s: t.service_id,
+                c: r.c
+            };
+        });
 
         let horarios = [];
         let limites = {};
-        
-        await new Promise((resolve) => {
-            const entry = zip.getEntry('stop_times.txt');
-            const bufferStream = new Readable();
-            bufferStream.push(entry.getData());
-            bufferStream.push(null);
+        const bufferStream = new Readable();
+        bufferStream.push(zip.getEntry('stop_times.txt').getData());
+        bufferStream.push(null);
 
+        await new Promise((resolve) => {
             bufferStream.pipe(csv()).on('data', (st) => {
-                if (!viajes[st.trip_id]) return; // Solo paradas de los viajes que hemos aceptado
-                
+                if (!viajes[st.trip_id]) return; 
                 let seq = parseInt(st.stop_sequence);
                 horarios.push({ t: st.trip_id, s: st.stop_id, a: st.arrival_time, d: st.departure_time, q: seq });
                 
@@ -79,9 +84,9 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
 
         const final = { v: "1.2", u: new Date().toLocaleString('es-ES'), e: estaciones, h: horarios, j: viajes, l: limites };
         fs.writeFileSync(archivoSalida, JSON.stringify(final));
-        console.log(`📦 Finalizado. Peso: ${Math.round(fs.statSync(archivoSalida).size / 1024 / 1024)} MB`);
+        console.log(`✅ ${tipoMalla} finalizado.`);
 
-    } catch (e) { console.error("❌ ERROR:", e); }
+    } catch (e) { console.error(e); }
 }
 
 async function start() {
