@@ -31,15 +31,21 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const calendar = await leerCSVdesdeZIP(zip, 'calendar.txt');
         const calendarDates = await leerCSVdesdeZIP(zip, 'calendar_dates.txt');
 
-        // 🎯 FILTRO DE SEGURIDAD: 45 DÍAS (Para no pasarnos de 100MB)
+        // 🎯 FILTRO ESTRATÉGICO: 30 DÍAS
         let hoy = new Date();
         let fHoy = hoy.getFullYear() + String(hoy.getMonth()+1).padStart(2,'0') + String(hoy.getDate()).padStart(2,'0');
-        let fMax = new Date(); fMax.setDate(hoy.getDate() + 45);
+        let fMax = new Date(); fMax.setDate(hoy.getDate() + 30);
         let fMaxStr = fMax.getFullYear() + String(fMax.getMonth()+1).padStart(2,'0') + String(fMax.getDate()).padStart(2,'0');
 
         let validSids = new Set();
-        calendar.forEach(c => { if (c.end_date >= fHoy && c.start_date <= fMaxStr) validSids.add(c.service_id); });
-        calendarDates.forEach(cd => { if (cd.date >= fHoy && cd.date <= fMaxStr) validSids.add(cd.service_id); });
+        // Solo servicios que estén activos hoy o en los próximos 30 días
+        calendar.forEach(c => { 
+            if (c.end_date >= fHoy && c.start_date <= fMaxStr) validSids.add(c.service_id); 
+        });
+        // Incluimos excepciones de calendario (días sueltos) en el rango
+        calendarDates.forEach(cd => { 
+            if (cd.date >= fHoy && cd.date <= fMaxStr) validSids.add(cd.service_id); 
+        });
 
         let estaciones = {};
         stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
