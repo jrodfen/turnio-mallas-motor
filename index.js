@@ -29,6 +29,17 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const routes = await leerCSVdesdeZIP(zip, 'routes.txt');
         const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
         const calendar = await leerCSVdesdeZIP(zip, 'calendar.txt');
+        const calendarDates = await leerCSVdesdeZIP(zip, 'calendar_dates.txt');
+
+        // 🎯 FILTRO DE SEGURIDAD: 45 DÍAS (Para no pasarnos de 100MB)
+        let hoy = new Date();
+        let fHoy = hoy.getFullYear() + String(hoy.getMonth()+1).padStart(2,'0') + String(hoy.getDate()).padStart(2,'0');
+        let fMax = new Date(); fMax.setDate(hoy.getDate() + 45);
+        let fMaxStr = fMax.getFullYear() + String(fMax.getMonth()+1).padStart(2,'0') + String(fMax.getDate()).padStart(2,'0');
+
+        let validSids = new Set();
+        calendar.forEach(c => { if (c.end_date >= fHoy && c.start_date <= fMaxStr) validSids.add(c.service_id); });
+        calendarDates.forEach(cd => { if (cd.date >= fHoy && cd.date <= fMaxStr) validSids.add(cd.service_id); });
 
         let estaciones = {};
         stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
@@ -38,7 +49,7 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
 
         let viajes = {};
         trips.forEach(t => {
-            // HEMOS QUITADO EL FILTRO DE FECHAS PARA QUE NO SALGA VACÍO
+            if (!validSids.has(t.service_id)) return; 
             viajes[t.trip_id] = {
                 n: t.trip_short_name || t.trip_id,
                 l: rutasMap[t.route_id] || "",
@@ -51,8 +62,9 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         let limites = {};
         
         await new Promise((resolve) => {
+            const entry = zip.getEntry('stop_times.txt');
             const bufferStream = new Readable();
-            bufferStream.push(zip.getEntry('stop_times.txt').getData());
+            bufferStream.push(entry.getData());
             bufferStream.push(null);
             bufferStream.pipe(csv()).on('data', (st) => {
                 if (!viajes[st.trip_id]) return; 
