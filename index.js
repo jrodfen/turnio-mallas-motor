@@ -25,28 +25,17 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const response = await axios.get(url, { responseType: 'arraybuffer' });
         const zip = new AdmZip(response.data);
         
-        const calendar = await leerCSVdesdeZIP(zip, 'calendar.txt');
         const routes = await leerCSVdesdeZIP(zip, 'routes.txt');
         const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
         const stops = await leerCSVdesdeZIP(zip, 'stops.txt');
 
-        // 📅 FILTRO: SOLO HOY (1 DÍA)
-        let hoy = new Date();
-        let fHoy = hoy.getFullYear() + String(hoy.getMonth()+1).padStart(2,'0') + String(hoy.getDate()).padStart(2,'0');
-
-        let sidsHoy = new Set();
-        calendar.forEach(c => { if (fHoy >= c.start_date && fHoy <= c.end_date) sidsHoy.add(c.service_id); });
-
-        // 🚫 FILTRO ANTI-RODALIES (Evita R1, R2, R3...)
+        // 🚫 FILTRO ANTI-RODALIES (Ignora R1, R2, R3...)
         const regexRodalies = /^R\d+/i; 
 
         let rutasValidas = {};
         routes.forEach(r => {
-            let nombreLargo = (r.route_long_name || "").trim();
             let nombreCorto = (r.route_short_name || "").trim();
-            
-            // Si empieza por R + número, lo ignoramos
-            if (regexRodalies.test(nombreCorto)) return;
+            if (regexRodalies.test(nombreCorto)) return; // Salta Rodalies
 
             rutasValidas[r.route_id] = {
                 p: tipoMalla === "Cercanías" ? "Cercanías" : "Media/Larga Distancia",
@@ -57,12 +46,19 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         });
 
         let viajes = {};
-        trips.forEach(t => {
-            if (!sidsHoy.has(t.service_id) || !rutasValidas[t.route_id]) return;
-            viajes[t.trip_id] = { ...rutasValidas[t.route_id], n: t.trip_short_name || t.trip_id, s: t.service_id };
+        // 🛡️ Limitamos a los primeros 15.000 para que GitHub no lo rechace
+        const tripsAceptados = trips.slice(0, 15000); 
+
+        tripsAceptados.forEach(t => {
+            if (!rutasValidas[t.route_id]) return;
+            viajes[t.trip_id] = { 
+                ...rutasValidas[t.route_id], 
+                n: t.trip_short_name || t.trip_id, 
+                s: t.service_id 
+            };
         });
 
-        console.log(`✅ Viajes para hoy (sin Rodalies): ${Object.keys(viajes).length}`);
+        console.log(`✅ Viajes encontrados (Sin Rodalies): ${Object.keys(viajes).length}`);
 
         let estaciones = {};
         stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
@@ -87,7 +83,7 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
 
         const final = { v: "1.4", e: estaciones, h: horarios, j: viajes, l: limites };
         fs.writeFileSync(archivoSalida, JSON.stringify(final));
-        console.log(`📦 Peso final: ${Math.round(fs.statSync(archivoSalida).size / 1024 / 1024)} MB`);
+        console.log(`📦 Finalizado. Peso: ${Math.round(fs.statSync(archivoSalida).size / 1024 / 1024)} MB`);
 
     } catch (e) { console.error(e); }
 }
