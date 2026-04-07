@@ -29,8 +29,8 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const routes = await leerCSVdesdeZIP(zip, 'routes.txt');
         const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
 
-        // Regex idéntica a tu Buscador.html
-        const regexConocidos = /\b(ave|alvia|avant|intercity|md|media distancia|regional|avlo|euromed|trenhotel|proximidad|express)\b/i;
+        // 🎯 FILTRO OFICIAL (Copiado de tu Buscador Trenes.html)
+        const regexLD = /\b(ave|alvia|avant|intercity|md|media distancia|regional|avlo|euromed|trenhotel|proximidad|express)\b/i;
 
         let estaciones = {};
         stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
@@ -40,24 +40,26 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
             let rShort = (r.route_short_name || "").trim();
             let rLong = (r.route_long_name || "").trim();
             let rDesc = (r.route_desc || "").trim();
-            let stringTest = (rShort + " " + rLong + " " + rDesc).toLowerCase();
+            let textoRuta = (rShort + " " + rLong + " " + rDesc).toLowerCase();
             
-            let esCercanias = !regexConocidos.test(stringTest);
-            let categoria = esCercanias ? "Cercanías" : (stringTest.match(regexConocidos)?.[0].toUpperCase() || "TREN");
+            let esCercanias = !regexLD.test(textoRuta);
+            let categoria = esCercanias ? "Cercanías" : (textoRuta.match(regexLD)?.[0].toUpperCase() || "TREN");
             let linea = rShort !== "" ? rShort : (rLong !== "" ? rLong : "Estándar");
 
             rutasMap[r.route_id] = {
-                p: categoria, // productoFiltro
-                f: esCercanias ? `Cercanías (Línea ${linea})` : categoria, // nombreVisualFrontal
-                l: linea, // lineaTren
+                p: categoria, // Producto (para el filtro de la App)
+                f: esCercanias ? `Cercanías (Línea ${linea})` : categoria, // Nombre Tarjeta
+                l: linea, // Línea específica
                 c: esCercanias
             };
         });
 
         let viajes = {};
-        const tripsLimitados = trips.slice(0, 20000); // 20k viajes para no saturar
+        // 🛡️ Filtro de volumen: Cogemos 12.000 viajes de Cercanías y todos los de LD
+        // Esto evita pasar de 100MB y asegura que los Cercanías entren en el archivo
+        const tripsFiltrados = tipoMalla === "Cercanías" ? trips.slice(0, 12000) : trips;
 
-        tripsLimitados.forEach(t => {
+        tripsFiltrados.forEach(t => {
             let r = rutasMap[t.route_id] || { p: "Tren", f: "Tren", l: "", c: false };
             viajes[t.trip_id] = {
                 n: t.trip_short_name || t.trip_headsign || t.trip_id,
@@ -70,6 +72,8 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
                 a: t.wheelchair_accessible || "0"
             };
         });
+
+        console.log(`✅ ${tipoMalla}: Procesando ${Object.keys(viajes).length} viajes útiles...`);
 
         let horarios = [];
         let limites = {};
@@ -95,8 +99,9 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
 
         const final = { v: "1.3", e: estaciones, h: horarios, j: viajes, l: limites };
         fs.writeFileSync(archivoSalida, JSON.stringify(final));
-        console.log(`✅ ${tipoMalla} procesado.`);
-    } catch (e) { console.error(e); }
+        console.log(`📦 Finalizado. Peso: ${Math.round(fs.statSync(archivoSalida).size / 1024 / 1024)} MB`);
+
+    } catch (e) { console.error("❌ ERROR:", e); }
 }
 
 async function start() {
