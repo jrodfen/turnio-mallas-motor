@@ -29,13 +29,13 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
         const stops = await leerCSVdesdeZIP(zip, 'stops.txt');
 
-        // 🚫 FILTRO ANTI-RODALIES (Ignora R1, R2, R3...)
+        // 🚫 FILTRO ANTI-RODALIES: Ignora líneas R1, R2, R3...
         const regexRodalies = /^R\d+/i; 
 
         let rutasValidas = {};
         routes.forEach(r => {
             let nombreCorto = (r.route_short_name || "").trim();
-            if (regexRodalies.test(nombreCorto)) return; // Salta Rodalies
+            if (regexRodalies.test(nombreCorto)) return; 
 
             rutasValidas[r.route_id] = {
                 p: tipoMalla === "Cercanías" ? "Cercanías" : "Media/Larga Distancia",
@@ -46,8 +46,8 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         });
 
         let viajes = {};
-        // 🛡️ Limitamos a los primeros 15.000 para que GitHub no lo rechace
-        const tripsAceptados = trips.slice(0, 15000); 
+        // ⚖️ LÍMITE DE SEGURIDAD: 45.000 viajes para maximizar datos sin exceder 100MB
+        const tripsAceptados = trips.slice(0, 45000); 
 
         tripsAceptados.forEach(t => {
             if (!rutasValidas[t.route_id]) return;
@@ -58,15 +58,16 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
             };
         });
 
-        console.log(`✅ Viajes encontrados (Sin Rodalies): ${Object.keys(viajes).length}`);
+        console.log(`✅ Viajes aceptados (Sin Rodalies): ${Object.keys(viajes).length}`);
 
         let estaciones = {};
         stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
 
         let horarios = [];
         let limites = {};
+        const stopTimesData = zip.getEntry('stop_times.txt').getData();
         const bufferStream = new Readable();
-        bufferStream.push(zip.getEntry('stop_times.txt').getData());
+        bufferStream.push(stopTimesData);
         bufferStream.push(null);
 
         await new Promise((resolve) => {
@@ -83,9 +84,11 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
 
         const final = { v: "1.4", e: estaciones, h: horarios, j: viajes, l: limites };
         fs.writeFileSync(archivoSalida, JSON.stringify(final));
-        console.log(`📦 Finalizado. Peso: ${Math.round(fs.statSync(archivoSalida).size / 1024 / 1024)} MB`);
+        
+        const pesoMB = Math.round(fs.statSync(archivoSalida).size / 1024 / 1024);
+        console.log(`📦 Finalizado. Peso: ${pesoMB} MB`);
 
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("❌ Error grave:", e); }
 }
 
 async function start() {
