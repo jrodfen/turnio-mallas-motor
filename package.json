@@ -1,0 +1,14 @@
+{
+  "name": "turnio-motor",
+  "version": "1.0.0",
+  "description": "Motor GTFS Cercanias y Larga Distancia",
+  "main": "index.js",
+  "scripts": {
+    "start": "node --max-old-space-size=6144 index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "adm-zip": "^0.5.10",
+    "csv-parser": "^3.0.0"
+  }
+}
