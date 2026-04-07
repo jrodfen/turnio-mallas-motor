@@ -34,10 +34,11 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
 
         let rutasValidas = {};
         routes.forEach(r => {
+            let routeIdLimpio = (r.route_id || "").trim(); // <-- ELIMINAMOS ESPACIOS BASURA
             let nombreCorto = (r.route_short_name || "").trim();
             if (regexRodalies.test(nombreCorto)) return; 
 
-            rutasValidas[r.route_id] = {
+            rutasValidas[routeIdLimpio] = {
                 p: tipoMalla === "Cercanías" ? "Cercanías" : "Media/Larga Distancia",
                 f: tipoMalla === "Cercanías" ? `Cercanías (Línea ${nombreCorto})` : nombreCorto,
                 l: nombreCorto,
@@ -46,22 +47,28 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         });
 
         let viajes = {};
-        // ⚖️ LÍMITE DE SEGURIDAD: 45.000 viajes para maximizar datos sin exceder 100MB
+        // ⚖️ Limitamos a 45.000 viajes
         const tripsAceptados = trips.slice(0, 45000); 
 
         tripsAceptados.forEach(t => {
-            if (!rutasValidas[t.route_id]) return;
-            viajes[t.trip_id] = { 
-                ...rutasValidas[t.route_id], 
-                n: t.trip_short_name || t.trip_id, 
-                s: t.service_id 
+            let routeIdViaje = (t.route_id || "").trim(); // <-- ELIMINAMOS ESPACIOS BASURA
+            let tripIdViaje = (t.trip_id || "").trim();
+            
+            if (!rutasValidas[routeIdViaje]) return; // ¡Ahora sí coincidirán!
+            
+            viajes[tripIdViaje] = { 
+                ...rutasValidas[routeIdViaje], 
+                n: (t.trip_short_name || t.trip_id).trim(), 
+                s: (t.service_id || "").trim() 
             };
         });
 
         console.log(`✅ Viajes aceptados (Sin Rodalies): ${Object.keys(viajes).length}`);
 
         let estaciones = {};
-        stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
+        stops.forEach(s => { 
+            estaciones[(s.stop_id || "").trim()] = (s.stop_name || "").trim(); 
+        });
 
         let horarios = [];
         let limites = {};
@@ -72,13 +79,20 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
 
         await new Promise((resolve) => {
             bufferStream.pipe(csv()).on('data', (st) => {
-                if (!viajes[st.trip_id]) return;
-                let seq = parseInt(st.stop_sequence);
-                horarios.push({ t: st.trip_id, s: st.stop_id, a: st.arrival_time, d: st.departure_time, q: seq });
+                let tripIdStop = (st.trip_id || "").trim();
+                let stopId = (st.stop_id || "").trim();
                 
-                if (!limites[st.trip_id]) limites[st.trip_id] = { min: seq, max: seq, o: st.stop_id, d: st.stop_id, h: st.arrival_time };
-                if (seq < limites[st.trip_id].min) { limites[st.trip_id].min = seq; limites[st.trip_id].o = st.stop_id; }
-                if (seq > limites[st.trip_id].max) { limites[st.trip_id].max = seq; limites[st.trip_id].d = st.stop_id; limites[st.trip_id].h = st.arrival_time; }
+                if (!viajes[tripIdStop]) return;
+                
+                let seq = parseInt(st.stop_sequence);
+                horarios.push({ t: tripIdStop, s: stopId, a: st.arrival_time, d: st.departure_time, q: seq });
+                
+                if (!limites[tripIdStop]) {
+                    limites[tripIdStop] = { min: seq, max: seq, o: stopId, d: stopId, h: st.arrival_time };
+                } else {
+                    if (seq < limites[tripIdStop].min) { limites[tripIdStop].min = seq; limites[tripIdStop].o = stopId; }
+                    if (seq > limites[tripIdStop].max) { limites[tripIdStop].max = seq; limites[tripIdStop].d = stopId; limites[tripIdStop].h = st.arrival_time; }
+                }
             }).on('end', resolve);
         });
 
