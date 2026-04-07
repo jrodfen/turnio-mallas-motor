@@ -25,83 +25,71 @@ async function procesarMalla(url, archivoSalida, tipoMalla) {
         const response = await axios.get(url, { responseType: 'arraybuffer' });
         const zip = new AdmZip(response.data);
         
-        const stops = await leerCSVdesdeZIP(zip, 'stops.txt');
+        const calendar = await leerCSVdesdeZIP(zip, 'calendar.txt');
         const routes = await leerCSVdesdeZIP(zip, 'routes.txt');
         const trips = await leerCSVdesdeZIP(zip, 'trips.txt');
+        const stops = await leerCSVdesdeZIP(zip, 'stops.txt');
 
-        // 🎯 FILTRO OFICIAL (Copiado de tu Buscador Trenes.html)
-        const regexLD = /\b(ave|alvia|avant|intercity|md|media distancia|regional|avlo|euromed|trenhotel|proximidad|express)\b/i;
+        // 📅 FILTRO: SOLO HOY (1 DÍA)
+        let hoy = new Date();
+        let fHoy = hoy.getFullYear() + String(hoy.getMonth()+1).padStart(2,'0') + String(hoy.getDate()).padStart(2,'0');
 
-        let estaciones = {};
-        stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
+        let sidsHoy = new Set();
+        calendar.forEach(c => { if (fHoy >= c.start_date && fHoy <= c.end_date) sidsHoy.add(c.service_id); });
 
-        let rutasMap = {};
+        // 🚫 FILTRO ANTI-RODALIES (Evita R1, R2, R3...)
+        const regexRodalies = /^R\d+/i; 
+
+        let rutasValidas = {};
         routes.forEach(r => {
-            let rShort = (r.route_short_name || "").trim();
-            let rLong = (r.route_long_name || "").trim();
-            let rDesc = (r.route_desc || "").trim();
-            let textoRuta = (rShort + " " + rLong + " " + rDesc).toLowerCase();
+            let nombreLargo = (r.route_long_name || "").trim();
+            let nombreCorto = (r.route_short_name || "").trim();
             
-            let esCercanias = !regexLD.test(textoRuta);
-            let categoria = esCercanias ? "Cercanías" : (textoRuta.match(regexLD)?.[0].toUpperCase() || "TREN");
-            let linea = rShort !== "" ? rShort : (rLong !== "" ? rLong : "Estándar");
+            // Si empieza por R + número, lo ignoramos
+            if (regexRodalies.test(nombreCorto)) return;
 
-            rutasMap[r.route_id] = {
-                p: categoria, // Producto (para el filtro de la App)
-                f: esCercanias ? `Cercanías (Línea ${linea})` : categoria, // Nombre Tarjeta
-                l: linea, // Línea específica
-                c: esCercanias
+            rutasValidas[r.route_id] = {
+                p: tipoMalla === "Cercanías" ? "Cercanías" : "Media/Larga Distancia",
+                f: tipoMalla === "Cercanías" ? `Cercanías (Línea ${nombreCorto})` : nombreCorto,
+                l: nombreCorto,
+                c: tipoMalla === "Cercanías"
             };
         });
 
         let viajes = {};
-        // 🛡️ Filtro de volumen: Cogemos 12.000 viajes de Cercanías y todos los de LD
-        // Esto evita pasar de 100MB y asegura que los Cercanías entren en el archivo
-        const tripsFiltrados = tipoMalla === "Cercanías" ? trips.slice(0, 12000) : trips;
-
-        tripsFiltrados.forEach(t => {
-            let r = rutasMap[t.route_id] || { p: "Tren", f: "Tren", l: "", c: false };
-            viajes[t.trip_id] = {
-                n: t.trip_short_name || t.trip_headsign || t.trip_id,
-                p: r.p,
-                f: r.f,
-                l: r.l,
-                c: r.c,
-                s: t.service_id,
-                u: t.block_id || "N/D",
-                a: t.wheelchair_accessible || "0"
-            };
+        trips.forEach(t => {
+            if (!sidsHoy.has(t.service_id) || !rutasValidas[t.route_id]) return;
+            viajes[t.trip_id] = { ...rutasValidas[t.route_id], n: t.trip_short_name || t.trip_id, s: t.service_id };
         });
 
-        console.log(`✅ ${tipoMalla}: Procesando ${Object.keys(viajes).length} viajes útiles...`);
+        console.log(`✅ Viajes para hoy (sin Rodalies): ${Object.keys(viajes).length}`);
+
+        let estaciones = {};
+        stops.forEach(s => { estaciones[s.stop_id] = s.stop_name; });
 
         let horarios = [];
         let limites = {};
-        const stopTimesEntry = zip.getEntry('stop_times.txt');
         const bufferStream = new Readable();
-        bufferStream.push(stopTimesEntry.getData());
+        bufferStream.push(zip.getEntry('stop_times.txt').getData());
         bufferStream.push(null);
 
         await new Promise((resolve) => {
             bufferStream.pipe(csv()).on('data', (st) => {
-                if (!viajes[st.trip_id]) return; 
+                if (!viajes[st.trip_id]) return;
                 let seq = parseInt(st.stop_sequence);
                 horarios.push({ t: st.trip_id, s: st.stop_id, a: st.arrival_time, d: st.departure_time, q: seq });
                 
-                if (!limites[st.trip_id]) {
-                    limites[st.trip_id] = { min: seq, max: seq, o: st.stop_id, d: st.stop_id, h: st.arrival_time };
-                } else {
-                    if (seq < limites[st.trip_id].min) { limites[st.trip_id].min = seq; limites[st.trip_id].o = st.stop_id; }
-                    if (seq > limites[st.trip_id].max) { limites[st.trip_id].max = seq; limites[st.trip_id].d = st.stop_id; limites[st.trip_id].h = st.arrival_time; }
-                }
+                if (!limites[st.trip_id]) limites[st.trip_id] = { min: seq, max: seq, o: st.stop_id, d: st.stop_id, h: st.arrival_time };
+                if (seq < limites[st.trip_id].min) { limites[st.trip_id].min = seq; limites[st.trip_id].o = st.stop_id; }
+                if (seq > limites[st.trip_id].max) { limites[st.trip_id].max = seq; limites[st.trip_id].d = st.stop_id; limites[st.trip_id].h = st.arrival_time; }
             }).on('end', resolve);
         });
 
-        const final = { v: "1.3", e: estaciones, h: horarios, j: viajes, l: limites };
+        const final = { v: "1.4", e: estaciones, h: horarios, j: viajes, l: limites };
         fs.writeFileSync(archivoSalida, JSON.stringify(final));
-        console.log(`📦 Finalizado. Peso: ${Math.round(fs.statSync(archivoSalida).size / 1024 / 1024)} MB`);
+        console.log(`📦 Peso final: ${Math.round(fs.statSync(archivoSalida).size / 1024 / 1024)} MB`);
 
-    } catch (e) { console.error("❌ ERROR:", e); }
+    } catch (e) { console.error(e); }
 }
 
 async function start() {
