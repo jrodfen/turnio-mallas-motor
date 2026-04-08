@@ -31,16 +31,25 @@ let limitesBrutos = { ...(cercanias.l || {}), ...(mdld.l || {}) };
 
 console.log(`📦 Datos brutos cargados: ${horariosBrutos.length} paradas totales en España.`);
 
-// ✂️ 3. LA CINTA TRANSPORTADORA (FILTRAMOS SOLO LO NECESARIO)
+// ✂️ 3. LA CINTA TRANSPORTADORA (FILTRO BLINDADO)
 let horariosFiltrados = horariosBrutos.filter(h => {
-    // Buscamos la letra del tren en su ID (ej. L13022)
-    let match = h.t.match(/([LMXJVSD])\d{4,5}/i);
+    let idTren = String(h.t).toUpperCase();
+
+    // 🛡️ CLÁUSULA RODALIES: Si el ID empieza por R o RT, se queda SÍ O SÍ
+    if (idTren.startsWith('R')) return true;
+
+    // 🛡️ CLÁUSULA DÍA DE LA SEMANA: Solo filtramos si detectamos una letra de día (L,M,X,J,V,S,D)
+    // Buscamos que empiece por una letra de día seguida de números
+    let match = idTren.match(/^([LMXJVSD])\d/);
+    
     if (match) {
-        let letraTren = match[1].toUpperCase();
-        // Si es de hoy o mañana, lo guardamos. Si no, a la basura.
+        let letraTren = match[1];
+        // Solo guardamos si coincide con hoy o mañana
         return letraTren === letraHoy || letraTren === letraManana;
     }
-    // Si es un tren especial sin letra, lo guardamos por si acaso
+
+    // 🛡️ CLÁUSULA DE SEGURIDAD: Si no tiene letra de día (solo números), lo dejamos pasar
+    // para no perder trenes de Cercanías que no sigan el patrón de letras.
     return true; 
 });
 
