@@ -1,0 +1,32 @@
+name: 🚆 Motor Nocturno Turnio
+
+# ⏰ Configuración del reloj: A las 04:00 AM UTC todos los días
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  # Esto nos permite ejecutarlo a mano dándole a un botón cuando queramos
+  workflow_dispatch:
+
+jobs:
+  procesar-mallas:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Descargar el código del repositorio
+      uses: actions/checkout@v3
+
+    - name: Configurar servidor de Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: ⚙️ Ejecutar filtro de HOY y MAÑANA
+      run: node filtro_diario.js
+
+    - name: 📤 Subir archivo ligero a GitHub
+      run: |
+        git config --global user.name "Robot de Turnio"
+        git config --global user.email "robot@turnio.app"
+        git add operativa_diaria.json
+        git commit -m "🚀 Operativa diaria actualizada automáticamente" || echo "No hay cambios nuevos"
+        git push
