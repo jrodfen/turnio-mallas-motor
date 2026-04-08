@@ -31,26 +31,37 @@ let limitesBrutos = { ...(cercanias.l || {}), ...(mdld.l || {}) };
 
 console.log(`📦 Datos brutos cargados: ${horariosBrutos.length} paradas totales en España.`);
 
-// ✂️ 3. LA CINTA TRANSPORTADORA (FILTRO BLINDADO)
+// ✂️ 3. LA CINTA TRANSPORTADORA (FILTRO ANTI-TRAMPAS DE RENFE)
+let laborables = ['L', 'M', 'X', 'J', 'V'];
+let esDiaLaborable = laborables.includes(letraHoy) || laborables.includes(letraManana);
+
 let horariosFiltrados = horariosBrutos.filter(h => {
     let idTren = String(h.t).toUpperCase();
 
-    // 🛡️ CLÁUSULA RODALIES: Si el ID empieza por R o RT, se queda SÍ O SÍ
+    // 🛡️ CLÁUSULA 1: Rodalies (R) o RT pasan directamente
     if (idTren.startsWith('R')) return true;
 
-    // 🛡️ CLÁUSULA DÍA DE LA SEMANA: Solo filtramos si detectamos una letra de día (L,M,X,J,V,S,D)
-    // Buscamos que empiece por una letra de día seguida de números
     let match = idTren.match(/^([LMXJVSD])\d/);
-    
     if (match) {
         let letraTren = match[1];
-        // Solo guardamos si coincide con hoy o mañana
-        return letraTren === letraHoy || letraTren === letraManana;
+
+        // 🛡️ CLÁUSULA 2: Coincidencia exacta con Hoy o Mañana
+        if (letraTren === letraHoy || letraTren === letraManana) return true;
+
+        // 🛡️ CLÁUSULA 3: La trampa de Rodalies (L = Laborables)
+        // Si el tren empieza por L, y hoy/mañana es entre Lunes y Viernes, lo guardamos
+        if (letraTren === 'L' && esDiaLaborable) return true;
+
+        // 🛡️ CLÁUSULA 4: La trampa de los Diarios (D = Diario / Domingo)
+        // Guardamos los D por seguridad, porque en muchos sitios significa que circula siempre
+        if (letraTren === 'D') return true;
+
+        // Si es un tren que estamos 100% seguros de que no circula (ej: es un tren 'S' de Sábado y hoy es Martes), a la basura.
+        return false;
     }
 
-    // 🛡️ CLÁUSULA DE SEGURIDAD: Si no tiene letra de día (solo números), lo dejamos pasar
-    // para no perder trenes de Cercanías que no sigan el patrón de letras.
-    return true; 
+    // 🛡️ CLÁUSULA 5: Si solo son números (ej: 77524) sin letra delante, pasa siempre
+    return true;
 });
 
 // 🧹 4. LIMPIEZA PROFUNDA (Borramos los datos de los trenes que hemos descartado)
